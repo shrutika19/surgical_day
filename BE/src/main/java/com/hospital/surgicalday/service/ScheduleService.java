@@ -2,6 +2,7 @@ package com.hospital.surgicalday.service;
 
 import com.hospital.surgicalday.dto.BookCaseRequest;
 import com.hospital.surgicalday.dto.RecoveryOccupancyResponse;
+import com.hospital.surgicalday.dto.SchedulePublicationResponse;
 import com.hospital.surgicalday.dto.SurgicalCaseResponse;
 import com.hospital.surgicalday.exception.ResourceNotFoundException;
 import com.hospital.surgicalday.exception.ScheduleConflictException;
@@ -53,10 +54,14 @@ public class ScheduleService {
                 ? request.getDurationMinutes()
                 : procedure.getDefaultMinutes();
 
+        validateSurgeryDuration(duration);
+
         LocalDateTime start = LocalDateTime.of(request.getSurgeryDate(), request.getStartTime());
         LocalDateTime end = start.plusMinutes(duration);
 
         validateSurgeonAvailability(request.getSurgeryDate(), surgeon.getId(), start, end);
+        validatePatientAvailability(request.getSurgeryDate(), patient.getId(), start, end);
+        validateTheatreAvailability(request.getSurgeryDate(), theatre.getId(), start, end);
         validateTheatreEquipment(theatre, procedure);
         validateRecoveryCapacity(request.getSurgeryDate(), start.plusMinutes(duration),
                 procedure.getRecoveryMinutes());
@@ -76,6 +81,29 @@ public class ScheduleService {
     }
 
     @Transactional(readOnly = true)
+    public SchedulePublicationResponse publish(LocalDate date) {
+        List<SurgicalCase> cases = surgicalCaseRepository.findBySurgeryDateOrderByStartTimeAsc(date);
+        for (SurgicalCase surgicalCase : cases) {
+            validateSurgeryDuration(surgicalCase.getDurationMinutes());
+            validateTheatreEquipment(surgicalCase.getTheatre(), surgicalCase.getProcedure());
+            validateSurgeonAvailability(date, surgicalCase.getSurgeon().getId(),
+                    surgicalCase.surgeryStartDateTime(), surgicalCase.surgeryEndDateTime(), surgicalCase.getId());
+            validatePatientAvailability(date, surgicalCase.getPatient().getId(),
+                    surgicalCase.surgeryStartDateTime(), surgicalCase.surgeryEndDateTime(), surgicalCase.getId());
+            validateTheatreAvailability(date, surgicalCase.getTheatre().getId(),
+                    surgicalCase.surgeryStartDateTime(), surgicalCase.surgeryEndDateTime(), surgicalCase.getId());
+            validateRecoveryCapacity(date, surgicalCase.projectedRecoveryStart(),
+                    surgicalCase.getProcedure().getRecoveryMinutes(), surgicalCase.getId());
+        }
+        return SchedulePublicationResponse.builder()
+                .surgeryDate(date)
+                .caseCount(cases.size())
+                .published(true)
+                .publishedAt(LocalDateTime.now())
+                .build();
+    }
+
+    @Transactional(readOnly = true)
     public RecoveryOccupancyResponse occupancy(LocalDate date, LocalTime at) {
         LocalDateTime instant = LocalDateTime.of(date, at);
         int capacity = (int) recoveryBedRepository.count();
@@ -89,9 +117,17 @@ public class ScheduleService {
     }
 
     private void validateSurgeonAvailability(LocalDate date, Long surgeonId,
-                                             LocalDateTime start, LocalDateTime end) {
+            LocalDateTime start, LocalDateTime end) {
+        validateSurgeonAvailability(date, surgeonId, start, end, null);
+    }
+
+    private void validateSurgeonAvailability(LocalDate date, Long surgeonId,
+            LocalDateTime start, LocalDateTime end, Long excludeCaseId) {
         List<SurgicalCase> existing = surgicalCaseRepository.findBySurgeryDateAndSurgeonId(date, surgeonId);
         for (SurgicalCase other : existing) {
+            if (excludeCaseId != null && excludeCaseId.equals(other.getId())) {
+                continue;
+            }
             if (other.getStatus() == CaseStatus.DISCHARGED) {
                 continue;
             }
@@ -104,6 +140,65 @@ public class ScheduleService {
                                 + " is already booked from " + other.getStartTime()
                                 + " for " + other.getDurationMinutes() + " minutes");
             }
+        }
+    }
+
+    private void validateTheatreAvailability(LocalDate date, Long theatreId,
+            LocalDateTime start, LocalDateTime end) {
+        validateTheatreAvailability(date, theatreId, start, end, null);
+    }
+
+    private void validateTheatreAvailability(LocalDate date, Long theatreId,
+            LocalDateTime start, LocalDateTime end, Long excludeCaseId) {
+        List<SurgicalCase> existing = surgicalCaseRepository.findBySurgeryDateAndTheatreId(date, theatreId);
+        for (SurgicalCase other : existing) {
+            if (excludeCaseId != null && excludeCaseId.equals(other.getId())) {
+                continue;
+            }
+            if (other.getStatus() == CaseStatus.DISCHARGED) {
+                continue;
+            }
+            LocalDateTime otherStart = other.surgeryStartDateTime();
+            LocalDateTime otherEnd = other.surgeryEndDateTime();
+            boolean overlaps = start.isBefore(otherEnd) && end.isAfter(otherStart);
+            if (overlaps) {
+                throw new ScheduleConflictException(
+                        "Theatre " + other.getTheatre().getName()
+                                + " is already booked from " + other.getStartTime()
+                                + " for " + other.getDurationMinutes() + " minutes");
+            }
+        }
+    }
+
+    private void validatePatientAvailability(LocalDate date, Long patientId,
+            LocalDateTime start, LocalDateTime end) {
+        validatePatientAvailability(date, patientId, start, end, null);
+    }
+
+    private void validatePatientAvailability(LocalDate date, Long patientId,
+            LocalDateTime start, LocalDateTime end, Long excludeCaseId) {
+        List<SurgicalCase> existing = surgicalCaseRepository.findBySurgeryDateAndPatientId(date, patientId);
+        for (SurgicalCase other : existing) {
+            if (excludeCaseId != null && excludeCaseId.equals(other.getId())) {
+                continue;
+            }
+            if (other.getStatus() == CaseStatus.DISCHARGED) {
+                continue;
+            }
+            boolean overlaps = start.isBefore(other.surgeryEndDateTime())
+                    && end.isAfter(other.surgeryStartDateTime());
+            if (overlaps) {
+                throw new ScheduleConflictException(
+                        "Patient " + other.getPatient().getFullName()
+                                + " is already booked from " + other.getStartTime()
+                                + " for " + other.getDurationMinutes() + " minutes");
+            }
+        }
+    }
+
+    private void validateSurgeryDuration(int durationMinutes) {
+        if (durationMinutes < 15) {
+            throw new ScheduleConflictException("Surgery duration must be at least 15 minutes");
         }
     }
 
@@ -122,16 +217,22 @@ public class ScheduleService {
     }
 
     private void validateRecoveryCapacity(LocalDate date, LocalDateTime recoveryStart, int recoveryMinutes) {
+        validateRecoveryCapacity(date, recoveryStart, recoveryMinutes, null);
+    }
+
+    private void validateRecoveryCapacity(LocalDate date, LocalDateTime recoveryStart, int recoveryMinutes,
+            Long excludeCaseId) {
         LocalDateTime recoveryEnd = recoveryStart.plusMinutes(recoveryMinutes);
         int capacity = (int) recoveryBedRepository.count();
         if (capacity == 0) {
             throw new ScheduleConflictException("No recovery beds configured");
         }
 
-        // Sample occupancy at recovery start and every 15 minutes through the recovery window
+        // Sample occupancy at recovery start and every 15 minutes through the recovery
+        // window
         LocalDateTime probe = recoveryStart;
         while (!probe.isAfter(recoveryEnd)) {
-            int occupied = countProjectedOccupancy(date, probe, null);
+            int occupied = countProjectedOccupancy(date, probe, excludeCaseId);
             if (occupied >= capacity) {
                 throw new ScheduleConflictException(
                         "Recovery beds would be full at " + probe.toLocalTime()
@@ -143,7 +244,8 @@ public class ScheduleService {
 
     /**
      * Counts cases that occupy a recovery bed at the given instant:
-     * already IN_RECOVERY (until discharge), or SCHEDULED/IN_THEATRE whose projected recovery window covers the instant.
+     * already IN_RECOVERY (until discharge), or SCHEDULED/IN_THEATRE whose
+     * projected recovery window covers the instant.
      */
     int countProjectedOccupancy(LocalDate date, LocalDateTime instant, Long excludeCaseId) {
         List<SurgicalCase> cases = surgicalCaseRepository.findBySurgeryDateAndStatusIn(

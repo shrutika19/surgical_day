@@ -13,5 +13,9 @@ public interface SurgicalCaseRepository extends JpaRepository<SurgicalCase, Long
 
     List<SurgicalCase> findBySurgeryDateAndSurgeonId(LocalDate surgeryDate, Long surgeonId);
 
+    List<SurgicalCase> findBySurgeryDateAndTheatreId(LocalDate surgeryDate, Long theatreId);
+
+    List<SurgicalCase> findBySurgeryDateAndPatientId(LocalDate surgeryDate, Long patientId);
+
     List<SurgicalCase> findBySurgeryDateAndStatusIn(LocalDate surgeryDate, List<CaseStatus> statuses);
 }

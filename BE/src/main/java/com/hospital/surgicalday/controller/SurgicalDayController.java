@@ -31,9 +31,16 @@ public class SurgicalDayController {
     }
 
     @PostMapping("/cases")
-    @Operation(summary = "Book a surgical case (validates surgeon, equipment, recovery)")
+    @Operation(summary = "Book a surgical case (validates surgeon, patient, theatre, equipment, recovery)")
     public SurgicalCaseResponse book(@Valid @RequestBody BookCaseRequest request) {
         return scheduleService.book(request);
+    }
+
+    @PostMapping("/schedules/{date}/publish")
+    @Operation(summary = "Validate and publish a surgery schedule")
+    public SchedulePublicationResponse publish(
+            @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return scheduleService.publish(date);
     }
 
     @PatchMapping("/cases/{id}/status")

@@ -128,10 +128,14 @@ In Swagger UI, use the reference-data endpoints first to discover the IDs for bu
 When `POST /api/cases` is called, the backend validates:
 
 1. **Surgeon availability:** the same surgeon cannot have overlapping cases on the same surgery date. Discharged cases do not block a new booking.
-2. **Theatre equipment:** the selected theatre must contain every equipment item required by the selected procedure.
-3. **Recovery capacity:** the projected recovery window is checked in 15-minute intervals. A booking is rejected when projected occupancy reaches the configured recovery-bed capacity.
-4. **Referenced resources:** the patient, procedure, theatre, and surgeon must all exist.
-5. **Request values:** required fields are validated, and a custom duration cannot be less than 15 minutes.
+2. **Patient availability:** the same patient cannot have overlapping surgeries on the same surgery date.
+3. **Theatre availability:** a theatre can host only one surgery at a time.
+4. **Theatre equipment:** the selected theatre must contain every equipment item required by the selected procedure.
+5. **Recovery capacity:** the projected recovery window is checked in 15-minute intervals. A booking is rejected when projected occupancy reaches the configured recovery-bed capacity.
+6. **Referenced resources:** the patient, procedure, theatre, and surgeon must all exist.
+7. **Request values:** required fields are validated, and a custom duration cannot be less than 15 minutes.
+
+Before a schedule is released, `POST /api/schedules/{date}/publish` rechecks every case for the selected date. The schedule is not published if any surgeon, patient, theatre, equipment, duration, or recovery conflict is found.
 
 The seeded environment contains two buildings, four theatres, three recovery beds, four surgeons, four procedure types, and six patients.
 
@@ -196,9 +200,12 @@ Replace the date and IDs when using a different database. The case should be cre
 ### C. Demonstrate the scheduling rules
 
 1. Book the same surgeon again at `08:30` while the first case is scheduled. The request is rejected because the surgeon's cases overlap.
-2. Book Knee Arthroscopy in `OT-4`. The request is rejected because `OT-4` does not have `ORTHO_DRILL` and `C_ARM`.
-3. Create three cases whose projected recovery windows overlap, then attempt a fourth overlapping case. The fourth request is rejected when the three recovery beds are projected to be full.
-4. Check occupancy directly with `GET /api/recovery/occupancy?date=YYYY-MM-DD&at=14:00`.
+2. Book the same patient at `08:30` with a different surgeon and theatre. The request is rejected because the patient's surgeries overlap.
+3. Book another patient in `OT-1` at `08:30`. The request is rejected because the theatre is already occupied.
+4. Book Knee Arthroscopy in `OT-4`. The request is rejected because `OT-4` does not have `ORTHO_DRILL` and `C_ARM`.
+5. Create three cases whose projected recovery windows overlap, then attempt a fourth overlapping case. The fourth request is rejected when the three recovery beds are projected to be full.
+6. Check occupancy directly with `GET /api/recovery/occupancy?date=YYYY-MM-DD&at=14:00`.
+7. Call `POST /api/schedules/YYYY-MM-DD/publish`. It returns a publication response only when the complete day passes all conflict checks.
 
 ### D. Follow a case to billing
 
@@ -223,19 +230,20 @@ The bill is available only after the case reaches `DISCHARGED`.
 
 All application endpoints are under `/api`:
 
-| Method | Endpoint                                           | Purpose                               |
-| ------ | -------------------------------------------------- | ------------------------------------- |
-| GET    | `/api/buildings`                                   | List buildings                        |
-| GET    | `/api/theatres`                                    | List theatres and equipment           |
-| GET    | `/api/surgeons`                                    | List surgeons                         |
-| GET    | `/api/procedures`                                  | List procedure types and requirements |
-| GET    | `/api/patients`                                    | List patients                         |
-| GET    | `/api/recovery-beds`                               | List recovery beds                    |
-| GET    | `/api/cases?date=YYYY-MM-DD`                       | List cases for a surgery date         |
-| POST   | `/api/cases`                                       | Book a case with schedule validation  |
-| PATCH  | `/api/cases/{id}/status`                           | Advance a case through its lifecycle  |
-| GET    | `/api/cases/{id}/bill`                             | Retrieve the discharge bill           |
-| GET    | `/api/recovery/occupancy?date=YYYY-MM-DD&at=HH:mm` | View projected recovery occupancy     |
+| Method | Endpoint                                           | Purpose                                |
+| ------ | -------------------------------------------------- | -------------------------------------- |
+| GET    | `/api/buildings`                                   | List buildings                         |
+| GET    | `/api/theatres`                                    | List theatres and equipment            |
+| GET    | `/api/surgeons`                                    | List surgeons                          |
+| GET    | `/api/procedures`                                  | List procedure types and requirements  |
+| GET    | `/api/patients`                                    | List patients                          |
+| GET    | `/api/recovery-beds`                               | List recovery beds                     |
+| GET    | `/api/cases?date=YYYY-MM-DD`                       | List cases for a surgery date          |
+| POST   | `/api/cases`                                       | Book a case with schedule validation   |
+| POST   | `/api/schedules/{date}/publish`                    | Validate and publish the full schedule |
+| PATCH  | `/api/cases/{id}/status`                           | Advance a case through its lifecycle   |
+| GET    | `/api/cases/{id}/bill`                             | Retrieve the discharge bill            |
+| GET    | `/api/recovery/occupancy?date=YYYY-MM-DD&at=HH:mm` | View projected recovery occupancy      |
 
 Errors are returned as JSON by the global exception handler, including validation errors, missing resources, and schedule conflicts.
 
