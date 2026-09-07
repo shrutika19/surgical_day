@@ -1,0 +1,25 @@
+server:
+  port: 8088
+
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/surgical_day}
+    username: ${SPRING_DATASOURCE_USERNAME:surgical}
+    password: ${SPRING_DATASOURCE_PASSWORD:surgical}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+logging:
+  level:
+    com.hospital.surgicalday: INFO

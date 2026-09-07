@@ -1,0 +1,24 @@
+# Java / Maven
+BE/target/
+*.class
+
+# Node / Vite
+FE/node_modules/
+FE/dist/
+FE/.vite/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# IDE and OS files
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
