@@ -8,6 +8,7 @@ import com.hospital.surgicalday.exception.ResourceNotFoundException;
 import com.hospital.surgicalday.exception.ScheduleConflictException;
 import com.hospital.surgicalday.model.*;
 import com.hospital.surgicalday.repository.*;
+import com.hospital.surgicalday.scheduling.TimeInterval;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,13 +42,13 @@ public class ScheduleService {
 
     @Transactional
     public SurgicalCaseResponse book(BookCaseRequest request) {
-        Patient patient = patientRepository.findById(request.getPatientId())
+        Patient patient = patientRepository.findWithLockById(request.getPatientId())
                 .orElseThrow(() -> new ResourceNotFoundException("Patient not found: " + request.getPatientId()));
         ProcedureType procedure = procedureTypeRepository.findById(request.getProcedureId())
                 .orElseThrow(() -> new ResourceNotFoundException("Procedure not found: " + request.getProcedureId()));
-        Theatre theatre = theatreRepository.findById(request.getTheatreId())
+        Theatre theatre = theatreRepository.findWithLockById(request.getTheatreId())
                 .orElseThrow(() -> new ResourceNotFoundException("Theatre not found: " + request.getTheatreId()));
-        Surgeon surgeon = surgeonRepository.findById(request.getSurgeonId())
+        Surgeon surgeon = surgeonRepository.findWithLockById(request.getSurgeonId())
                 .orElseThrow(() -> new ResourceNotFoundException("Surgeon not found: " + request.getSurgeonId()));
 
         int duration = request.getDurationMinutes() != null
@@ -133,8 +134,7 @@ public class ScheduleService {
             }
             LocalDateTime otherStart = other.surgeryStartDateTime();
             LocalDateTime otherEnd = other.surgeryEndDateTime();
-            boolean overlaps = start.isBefore(otherEnd) && end.isAfter(otherStart);
-            if (overlaps) {
+            if (new TimeInterval(start, end).overlaps(new TimeInterval(otherStart, otherEnd))) {
                 throw new ScheduleConflictException(
                         "Surgeon " + other.getSurgeon().getName()
                                 + " is already booked from " + other.getStartTime()
@@ -160,8 +160,7 @@ public class ScheduleService {
             }
             LocalDateTime otherStart = other.surgeryStartDateTime();
             LocalDateTime otherEnd = other.surgeryEndDateTime();
-            boolean overlaps = start.isBefore(otherEnd) && end.isAfter(otherStart);
-            if (overlaps) {
+            if (new TimeInterval(start, end).overlaps(new TimeInterval(otherStart, otherEnd))) {
                 throw new ScheduleConflictException(
                         "Theatre " + other.getTheatre().getName()
                                 + " is already booked from " + other.getStartTime()
@@ -185,9 +184,8 @@ public class ScheduleService {
             if (other.getStatus() == CaseStatus.DISCHARGED) {
                 continue;
             }
-            boolean overlaps = start.isBefore(other.surgeryEndDateTime())
-                    && end.isAfter(other.surgeryStartDateTime());
-            if (overlaps) {
+                if (new TimeInterval(start, end).overlaps(
+                    new TimeInterval(other.surgeryStartDateTime(), other.surgeryEndDateTime()))) {
                 throw new ScheduleConflictException(
                         "Patient " + other.getPatient().getFullName()
                                 + " is already booked from " + other.getStartTime()

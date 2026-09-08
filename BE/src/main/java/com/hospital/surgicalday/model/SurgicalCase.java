@@ -20,6 +20,9 @@ public class SurgicalCase {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Version
+    private Long version;
+
     @Column(nullable = false)
     private LocalDate surgeryDate;
 
